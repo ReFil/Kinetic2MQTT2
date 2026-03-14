@@ -9,7 +9,7 @@
 // Enable polling the devices
 #define ENABLE_POLLING
 // Polling interval in seconds (multiplied by number of devices for per-device poll interval)
-#define POLL_INTERVAL_S 60
+#define POLL_INTERVAL_S 45
 
 //#define DEBUG_SERIAL
 
@@ -379,10 +379,12 @@ void loop() {
         struct kineticMessage *msg;
         msg = decodeTransmission(dataBuf);
         
-        if (msg->devType != UNKNOWN && (msg->devType != POLL)) {
+        if (msg->devType != UNKNOWN) {
           handleReceivedMessage(msg);
         } else {
           #ifdef DEBUG_SERIAL
+          Serial.print(msg->devType);
+
           Serial.println("Decoded message is invalid or unknown type");
           #endif
         }
@@ -408,28 +410,43 @@ void handleReceivedMessage(struct kineticMessage* msg) {
   
   unsigned long currentTime = millis();
   
-  // Debounce switch-only devices (they repeatedly transmit until they run out of energy)
-  if (msg->devType == SWITCH_ONLY) {
-    for (int i = 0; i < MAX_DEVICE_IDS; i++) {
-      if (deviceStates[i].deviceID == msg->deviceID) {
-        // Skip if same message received within debounce window and state unchanged
-        if ((currentTime - deviceStates[i].lastMessageTime) < DEBOUNCE_MILLIS && deviceStates[i].state == msg->state) {
-          return;
-        }
-        break;
-      }
+  // Find or initialize device state
+  int deviceIndex = -1;
+  for (int i = 0; i < MAX_DEVICE_IDS; i++) {
+    if (deviceStates[i].deviceID == msg->deviceID) {
+      deviceIndex = i;
+      break;
+    }
+    // Track first empty slot for new devices
+    if (deviceStates[i].deviceID == 0 && deviceIndex == -1) {
+      deviceIndex = i;
     }
   }
   
-  // Update device state tracking
-  for (int i = 0; i < MAX_DEVICE_IDS; i++) {
-    if (deviceStates[i].deviceID == msg->deviceID) {
-      deviceStates[i].state = msg->state;
-      deviceStates[i].rssi = (int)radio.getRSSI();
-      deviceStates[i].lastUpdate = currentTime;
-      deviceStates[i].lastMessageTime = currentTime;
-      break;
+  // If we found or allocated a slot, check debouncing
+  if (deviceIndex >= 0) {
+    // Debounce switch-only devices (they repeatedly transmit until they run out of energy)
+    if (msg->devType == SWITCH_ONLY) {
+      // Skip if same message received within debounce window and state unchanged
+      if ((currentTime - deviceStates[deviceIndex].lastMessageTime) < DEBOUNCE_MILLIS && 
+          deviceStates[deviceIndex].state == msg->state) {
+        #ifdef DEBUG_SERIAL
+        Serial.println("Debouncing");
+        #endif
+        return;
+      }
     }
+    
+    // Update device state tracking
+    deviceStates[deviceIndex].deviceID = msg->deviceID;
+    deviceStates[deviceIndex].state = msg->state;
+    deviceStates[deviceIndex].rssi = (int)radio.getRSSI();
+    deviceStates[deviceIndex].lastUpdate = currentTime;
+    deviceStates[deviceIndex].lastMessageTime = currentTime;
+    
+    #ifdef DEBUG_SERIAL
+    Serial.println("Updated device state");
+    #endif
   }
   
   if (mqttClient.connected()) {

@@ -99,6 +99,10 @@ struct kineticMessage* decodeTransmission(uint8_t *inBuf){
 
   if(uint16_t(crc) == messageCRC){
     // Valid switch only message
+    #ifdef DEBUG_SERIAL
+    Serial.print("Switch detected crc");
+    Serial.println(crc, HEX);
+    #endif
     msg.deviceID = (inBuf[0] << 8) | inBuf[1];
     msg.devType = SWITCH_ONLY;
     msg.msgType = STATE; // Switch only devices only send state
